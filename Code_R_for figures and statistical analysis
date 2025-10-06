@@ -17,18 +17,21 @@ library(ggrepel)
 library(FSA)
 library(dunn.test)
 
+
 ### Read dataset
 
-df <- read_csv("Interactions_RII_neighbours_associated.csv")
+df <- read_delim("Interactions_RII_neighbours_associated.csv", 
+                                                     delim = ";", escape_double = FALSE, trim_ws = TRUE)
 colnames(df)
 
 ### Predictions of RII variations
 
 # RII ~ site * deglaciated area + log(canopy volume) + site : neighbouring species
 
-model_interaction_explicit <- lm(RII ~ Site * Deglaciated_area +log(Volume_canopy) + Site_Nurse, data = df)
+model_interaction_explicit <- lm(RII ~ Site * Deglaciated_area + log(Volume_canopy) + Site_Nurse, data = df)
 
 anova(model_interaction_explicit)
+
 summary(model_interaction_explicit)
 par(mfrow=c(2,2))
 plot(model_interaction_explicit)
@@ -240,7 +243,7 @@ wilcox_results <- df_compare %>%
   group_by(Espece_nurse) %>%  
   summarise(  
     mean_RII = mean(pred_RII, na.rm = TRUE),  
-    se_RII = sd(pred_RII, na.rm = TRUE) / sqrt(n()),  
+    se_RII = sd(RII, na.rm = TRUE) / sqrt(n()),  
     p_value = tryCatch({wilcox.test(pred_RII, mu = 0)$p.value}, error = function(e) NA),  
     n = n(),  
     .groups = "drop"  
@@ -273,11 +276,11 @@ Table_summ <- Table_summ %>%
 # and associated species by site and by deglaciated area
 
 table_repetitions <- df %>%
-  group_by(Life_Form, Espece_nurse, Site, Deglaciated_area) %>%
+  group_by(Espece_nurse, Site, Deglaciated_area) %>%
   summarise(Repetitions = n(), .groups = 'drop') %>%
   unite("Site_Zone", Site, Deglaciated_area, sep = "_") %>%
   pivot_wider(names_from = Site_Zone, values_from = Repetitions, values_fill = 0) %>%
-  arrange(Life_Form, Espece_nurse)
+  arrange(Espece_nurse)
 
 ### Appendix S3.
 
@@ -309,16 +312,13 @@ summary(mod)
 
 # Table S4. Mean canopy volume (cm3) per neighbouring species.
 
-volume_canopy <- df_compare %>%
-  group_by(Site, Espece_nurse, Life_Form) %>%
+volume_canopy <- df %>%
+  group_by(Espece_nurse) %>%
   summarise(
     Volume_canopy = mean(Volume_canopy, na.rm = TRUE),
-    RII_mean = mean(pred_RII, na.rm = TRUE),
+    sd_vol= round(sd(Volume_canopy, na.rm = TRUE), 3),
     .groups = 'drop'
-  ) %>%
-  group_by(Site) %>%
-  mutate(y_order = rank(RII_mean)) %>%
-  ungroup()
+  )
 
 # Figure S4. Volume of neighbouring species’ canopy (cm3, log scaled) and their life form.
 
@@ -364,7 +364,7 @@ ggplot(df_compare,
 
 # Figure S5. Mean RII in relation to life forms of neighbouring species.
 
-kruskal <- kruskal.test(Volume_canopy  ~ Life_Form, data = df)
+kruskal <- kruskal.test(Volume_canopy ~ Life_Form, data = df)
 
 print(kruskal)
 dunn_res <- dunn.test(df$Volume_canopy, df$Life_Form, kw = FALSE, method='bh')
@@ -409,14 +409,7 @@ summary(model_interaction_explicit)
 
 rii_means <- df_compare %>% 
   group_by(Espece_nurse, Deglaciated_area) %>% 
-  summarise(mean_RII = mean(pred_RII, na.rm = TRUE), .groups = "drop") %>% 
-  mutate(Zone_label = recode(Deglaciated_area, "A" = "0-30", "B" = "30-60"))
-
-rii_means <- rii_means %>% 
-  group_by(Zone_label) %>% 
-  arrange(mean_RII, .by_group = TRUE) %>% 
-  mutate(Species_in_zone = factor(Espece_nurse, levels = unique(Espece_nurse))) %>% 
-  ungroup()
+  summarise(mean_RII = mean(pred_RII, na.rm = TRUE), .groups = "drop")
 
 # Figure S7. a) 0-30 years since glacier retreat
 
@@ -437,11 +430,21 @@ wilcox_results <- df_compare %>%
       TRUE ~ "ns"  
     )  
   )  
+rii_zone_0_30 <- rii_means %>% filter(Deglaciated_area == 'A')
+rii_zone_0_30 <- rii_zone_0_30 %>%
+  arrange(mean_RII) %>%
+  mutate(Espece_nurse = factor(Espece_nurse, levels = unique(Espece_nurse)))
+wilcox_results_A = wilcox_results %>% filter(Deglaciated_area == 'A')
 
-ggplot(filter(rii_means, Zone_label == "0-30"),
-       aes(x = mean_RII, y = Species_in_zone)) +
+ggplot(rii_zone_0_30, aes(x = mean_RII, y = Espece_nurse)) +
   geom_vline(xintercept = 0, linetype = "dashed") +
   geom_point(size = 3, colour = "darkorange") +
+  geom_text(data = wilcox_results_A,
+            aes(x = ifelse(mean_RII < 0,-0.6, 0.6),
+                y = Espece_nurse,
+                label = significance),
+            hjust = ifelse(wilcox_results_A$mean_RII < 0, 1, 0),
+            size = 6) +
   scale_x_continuous(limits = c(-1, 1), breaks = seq(-1, 1, 0.5)) +
   labs(title = "a) 0-30 years",
        x = "Mean RII", y = "Neighbouring species") +
@@ -450,14 +453,21 @@ ggplot(filter(rii_means, Zone_label == "0-30"),
 
 # Figure S7. b) 30-60 years since glacier retreat
 
-rii_zone_30_60 <- rii_means %>% filter(Zone_label == '30-60')
+rii_zone_30_60 <- rii_means %>% filter(Deglaciated_area == 'B')
 rii_zone_30_60 <- rii_zone_30_60 %>%
   arrange(mean_RII) %>%
-  mutate(Species_in_zone = factor(Species_in_zone, levels = unique(Species_in_zone)))
+  mutate(Espece_nurse = factor(Espece_nurse, levels = unique(Espece_nurse)))
+wilcox_results_B = wilcox_results %>% filter(Deglaciated_area == 'B')
 
-ggplot(rii_zone_30_60, aes(x = mean_RII, y = Species_in_zone)) +
+ggplot(rii_zone_30_60, aes(x = mean_RII, y = Espece_nurse)) +
   geom_point(size = 3, colour = 'darkorange') +
   geom_vline(xintercept = 0, linetype = "dashed") +
+  geom_text(data = wilcox_results_B,
+            aes(x = ifelse(mean_RII < 0,-0.6, 0.6),
+                y = Espece_nurse,
+                label = significance),
+            hjust = ifelse(wilcox_results_B$mean_RII < 0, 1, 0),
+            size = 6) +
   scale_x_continuous(limits = c(-1, 1), breaks = seq(-1, 1, 0.5)) +
   labs(title = 'b) 30-60 years',
        x = 'Mean RII', y = 'Neighbouring species') +
