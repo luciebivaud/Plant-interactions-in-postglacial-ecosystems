@@ -1,0 +1,534 @@
+### Paper: Plant-plant interactions in postglacial ecosystems in tropical and temperate latitudes
+##  October 2025
+
+### Library
+
+library(dplyr)
+library(tidyr)
+library(ggplot2)
+library(rstatix)
+library(boot) 
+library(readr)
+library(lme4)
+library(lmerTest)
+library(purrr)
+library(broom)
+library(ggrepel)
+library(FSA)
+library(dunn.test)
+
+### Read dataset
+
+df <- read_csv("Interactions_RII_neighbours_associated.csv")
+colnames(df)
+
+### Predictions of RII variations
+
+# RII ~ site * deglaciated area + log(canopy volume) + site : neighbouring species
+
+model_interaction_explicit <- lm(RII ~ Site * Deglaciated_area +log(Volume_canopy) + Site_Nurse, data = df)
+
+anova(model_interaction_explicit)
+summary(model_interaction_explicit)
+par(mfrow=c(2,2))
+plot(model_interaction_explicit)
+
+predictions <- predict(model_interaction_explicit, newdata = df)
+print(sum(is.na(predictions)))
+
+coefficients_summary <- summary(model_interaction_explicit)$coefficients
+
+df_compare <- df %>%
+  mutate(raw_RII = RII, pred_RII = predict(model_interaction_explicit))
+
+df_compare <- df %>% mutate(pred_RII = predict(model_interaction_explicit),resid = RII - pred_RII)
+
+rmse_val <- sqrt(mean(df_compare$resid^2))
+mae_val <- mean(abs(df_compare$resid))
+corr_val <- cor(df_compare$RII, df_compare$pred_RII)
+
+### Results
+
+colnames(df_compare)
+
+# Table 1.
+
+anova(model_interaction_explicit)
+
+# Figure 4.
+
+custom_colors <- c("Temperate" = "#A2CBE2", "Tropical" = "#C65F00")
+
+df_compare <- df_compare %>%
+  mutate(Temp_Trop = case_when(
+    Site == "Gébroulaz (FR)" ~ "Temperate",
+    Site %in% c("Uruashraju (PE)", "Glacier 10 (BO)") ~ "Tropical",
+    TRUE ~ NA_character_))
+
+climate_stats <- df_compare%>%
+  group_by(Temp_Trop) %>%
+  summarise(
+    n = n(),
+    mean_RII = round(mean(pred_RII, na.rm = TRUE), 3),
+    sd_RII = round(sd(pred_RII, na.rm = TRUE), 3),
+    se_RII = round(sd(pred_RII, na.rm = TRUE) / sqrt(n()), 3),
+    wilcox_p = round(wilcox.test(pred_RII, mu = 0)$p.value, 3),
+    significance = case_when(
+      wilcox_p < 0.001 ~ "***",
+      wilcox_p < 0.01 ~ "**",
+      wilcox_p < 0.05 ~ "*",
+      TRUE ~ "ns"
+    )
+  )
+
+p=ggplot() +
+  geom_boxplot(data = p <- ggplot() +
+                 geom_boxplot(data = df_compare, aes(x = pred_RII, y = Temp_Trop, fill = Temp_Trop), width = 0.4) +
+                 geom_vline(xintercept = 0, linetype = "dashed") +
+                 geom_text(data = climate_stats,
+                           aes(x = ifelse(mean_RII < 0, -1, 1),
+                               y = Temp_Trop,
+                               label = significance),
+                           hjust = ifelse(climate_stats$mean_RII < 0, 1, 0),
+                           size = 8) +
+                 stat_summary(fun=mean, geom="point", shape=23, size=3, fill="white") +
+                 theme_minimal() +
+                 scale_fill_manual(values = custom_colors) +
+                 labs(x = "Mean RII", y = "Latitude") +
+                 theme(legend.position = "none"))
+
+# Figure 5.
+
+custom_colors2<- c("Gébroulaz (FR)"="#3399CC", "Uruashraju (PE)" ="#FF9900" , "Glacier 10 (BO)"="#CC9966")
+
+reps <- df_compare %>%   
+  group_by(Deglaciated_area, Site) %>%   
+  summarise(n = n(),  
+            RII_end = max(RII),         
+            .groups = "drop") 
+
+moyennes_zone <- df_compare %>%   
+  group_by(Deglaciated_area) %>%   
+  summarise(RII_mean = mean(pred_RII, na.rm = TRUE),
+            wilcox_p = round(wilcox.test(pred_RII, mu = 0)$p.value, 3),
+            significance = case_when(
+              wilcox_p < 0.001 ~ "***",
+              wilcox_p < 0.01 ~ "**",
+              wilcox_p < 0.05 ~ "*",
+              TRUE ~ "ns") )
+
+zone_site <- df_compare%>%
+  group_by(Site, Deglaciated_area) %>%
+  summarise(
+    n = n(),
+    mean_RII = round(mean(pred_RII, na.rm = TRUE), 3),
+    sd_RII = round(sd(pred_RII, na.rm = TRUE), 3),
+    se_RII = round(sd(pred_RII, na.rm = TRUE) / sqrt(n()), 3),
+    wilcox_p = round(wilcox.test(pred_RII, mu = 0)$p.value, 3),
+    significance = case_when(
+      wilcox_p < 0.001 ~ "***",
+      wilcox_p < 0.01 ~ "**",
+      wilcox_p < 0.05 ~ "*",
+      TRUE ~ "ns"
+    )
+  )
+
+zone_site <- zone_site %>%
+  mutate(Deglaciated_area = recode(Deglaciated_area,
+                       "A" = "0-30 years",
+                       "B" = "30-60 years"))
+site_counts <- site_counts %>%
+  mutate(Deglaciated_area= recode(Deglaciated_area,
+                       "A" = "0-30 years",
+                       "B" = "30-60 years"))
+moyennes_zone <- moyennes_zone %>%
+  mutate(Deglaciated_area = recode(Deglaciated_area,
+                       "A" = "0-30 years",
+                       "B" = "30-60 years"))
+
+ggplot(zone_site, aes(x =mean_RII , y = Site, colour = Site)) +  
+  geom_point(size = 4, alpha = 0.8) +     
+  geom_vline(xintercept = 0, linetype = "dashed", color = "gray50") +# points pour chaque observation  
+  facet_wrap(~ Deglaciated_area, ncol = 1, scales = "free_y") +        # une « vignette » par zone  
+  # ligne pointillée verticale = moyenne par zone  
+  geom_vline(data = moyennes_zone,  
+             aes(xintercept = RII_mean),  
+             linetype = "dashed",  
+             colour = "black",  
+             size = 0.4) +  
+  scale_colour_manual(values=custom_colors2) +  
+  scale_x_continuous(limits = c(-1, 1)) + 
+  labs(x = " Mean RII",  
+       y = "",  
+       colour = "Site",  
+       title = "") +  
+  geom_text(data = zone_site,  
+            aes(x =  0.7,   
+                label = paste0("n=", n)),  
+            hjust = 0, vjust = 0.5,  
+            size = 3.2,  
+            colour = "black") +
+  geom_text(data = moyennes_zone,  
+            aes(x = RII_mean +0.04, y = Inf,  
+                label = paste0("Mean = ", round(RII_mean, 3))),  
+            vjust = 1.3, hjust = 0, colour = "red", size = 4) +
+  theme_minimal() +  
+  theme(strip.text = element_text(face = "bold"))
+annotate("text", x = 0.5, y=zone_site$mean_RII,
+         label = zone_site$significance,
+         hjust = -0.1, vjust = -0.5, color = "red") 
+
+# Figure 6.
+
+growth_stats <- df_compare%>%
+  group_by(Site, Espece_nurse, Life_Form) %>%
+  summarise(
+    n = n(),
+    mean_RII = round(mean(pred_RII, na.rm = TRUE), 3),
+    sd_RII = round(sd(pred_RII, na.rm = TRUE), 3),
+    se_RII = round(sd(pred_RII, na.rm = TRUE) / sqrt(n()), 3),
+    wilcox_p = round(wilcox.test(pred_RII, mu = 0)$p.value, 3),
+    significance = case_when(
+      wilcox_p < 0.001 ~ "***",
+      wilcox_p < 0.01 ~ "**",
+      wilcox_p < 0.05 ~ "*",
+      TRUE ~ "ns"
+    )
+  )
+
+df_compare_vol_can<- df_compare %>%
+  group_by(Site, Espece_nurse, Life_Form) %>%
+  summarise(
+    Volume_canopy = mean(Volume_canopy, na.rm = TRUE),
+    RII_mean = mean(pred_RII, na.rm = TRUE),
+    .groups = 'drop'
+  ) %>%
+  group_by(Site) %>%
+  mutate(y_order = rank(RII_mean)) %>%
+  ungroup()
+
+ggplot(df_compare_vol_can, aes(x = RII_mean, 
+                          y = reorder(Espece_nurse, y_order), 
+                          color = Life_Form, 
+                          size = Volume_canopy)) +
+  geom_vline(xintercept = 0, linetype = "dashed", color = "gray") +
+  geom_point(alpha = 0.7) +
+  geom_text(data = growth_stats,
+            aes(x = ifelse(mean_RII < 0,-0.6, 0.6),
+                y = Espece_nurse,
+                label = significance),
+            hjust = ifelse(growth_stats$mean_RII < 0, 1, 0),
+            size = 6) +
+  scale_size_continuous(range = c(3, 15)) +
+  scale_x_continuous(limits = c(-1, 1)) +
+  facet_grid(Site ~ ., scales = "free_y", space = "free") +
+  theme_bw() +
+  labs(x = "Mean RII",
+       y = "Neighbouring species",
+       color = "Life Form",
+       size = "Canopy Volume") +
+  theme(axis.text.y = element_text(size = 10),
+        strip.text = element_text(size = 12, face = "bold"),
+        legend.position = "right")+
+  theme_minimal()
+
+### Appendix S2.
+
+# Table S2.1. Mean predicted species-level RII for each neighbour species. 
+
+wilcox_results <- df_compare %>%  
+  group_by(Espece_nurse) %>%  
+  summarise(  
+    mean_RII = mean(pred_RII, na.rm = TRUE),  
+    se_RII = sd(pred_RII, na.rm = TRUE) / sqrt(n()),  
+    p_value = tryCatch({wilcox.test(pred_RII, mu = 0)$p.value}, error = function(e) NA),  
+    n = n(),  
+    .groups = "drop"  
+  ) %>%  
+  mutate(  
+    significance = case_when(  
+      !is.na(p_value) & p_value < 0.001 ~ "***",  
+      !is.na(p_value) & p_value < 0.01 ~ "**",  
+      !is.na(p_value) & p_value < 0.05 ~ "*",  
+      TRUE ~ "ns"  
+    )  
+  ) 
+
+# Table S2.2. Mean species-level RII for each neighbour species by deglaciated area and site.
+
+Table_summ <- df_compare %>%  
+  group_by(Espece_nurse, Deglaciated_area, Life_Form) %>%  
+  summarise(  
+    mean_RII = mean(RII, na.rm = TRUE),
+    n = n(),  
+    .groups = "drop"  
+  )
+
+Table_summ <- Table_summ %>%
+  mutate(Deglaciated_area = recode(Deglaciated_area,
+                                   "A" = "0-30 years",
+                                   "B" = "30-60 years"))
+
+# Table S2.3. Detailed sampling of the number of RII values between neighbouring species
+# and associated species by site and by deglaciated area
+
+table_repetitions <- df %>%
+  group_by(Life_Form, Espece_nurse, Site, Deglaciated_area) %>%
+  summarise(Repetitions = n(), .groups = 'drop') %>%
+  unite("Site_Zone", Site, Deglaciated_area, sep = "_") %>%
+  pivot_wider(names_from = Site_Zone, values_from = Repetitions, values_fill = 0) %>%
+  arrange(Life_Form, Espece_nurse)
+
+### Appendix S3.
+
+# Figure S3. Community-level interaction intensity in relation to mean species-level RII. 
+
+df_comm_spe <- df %>% 
+  group_by(Site, Deglaciated_area) %>% 
+  summarise(Community_RII = mean(RII, na.rm = TRUE), .groups = "drop")
+
+species_mean <- df %>% 
+  group_by(Site, Deglaciated_area,Espece_nurse) %>% 
+  summarise(Species_mean_RII = mean(RII, na.rm = TRUE), .groups = "drop")
+
+after_merge <- species_mean %>% inner_join(df_comm_spe, by = c("Site", "Deglaciated_area"))
+
+ggplot(after_merge, aes(x = Community_RII, y =Species_mean_RII , colour=Espece_nurse )) +
+  geom_point(size = 3) +
+  geom_abline(slope = 1, intercept = 0, linetype = "dashed") +
+  geom_smooth(method = "lm", se = T, color = "black", linetype = "solid", fill = "grey90") +
+  xlim(-0.2, 0.4) +
+  ylim(-0.6,0.6)+
+  labs(title = "", x = "Community-Level RII", y = "Mean Species RII") +
+  theme_minimal()
+
+mod=lm(Community_RII~Species_mean_RII, after_merge)
+summary(mod)
+
+### Appendix S4.
+
+# Table S4. Mean canopy volume (cm3) per neighbouring species.
+
+volume_canopy <- df_compare %>%
+  group_by(Site, Espece_nurse, Life_Form) %>%
+  summarise(
+    Volume_canopy = mean(Volume_canopy, na.rm = TRUE),
+    RII_mean = mean(pred_RII, na.rm = TRUE),
+    .groups = 'drop'
+  ) %>%
+  group_by(Site) %>%
+  mutate(y_order = rank(RII_mean)) %>%
+  ungroup()
+
+# Figure S4. Volume of neighbouring species’ canopy (cm3, log scaled) and their life form.
+
+order_species_desc <- df_compare %>%
+  group_by(Espece_nurse) %>%
+  summarise(median_canopy = median(Volume_canopy, na.rm = TRUE)) %>%
+  arrange(desc(median_canopy)) %>%
+  pull(Espece_nurse)
+
+df_compare$Espece_nurse <- factor(df_compare$Espece_nurse, levels = order_species_desc)
+
+ggplot(df_compare,
+       aes(x = Espece_nurse,
+           y = Volume_canopy,
+           fill = Life_Form)) +
+  geom_violin(trim = FALSE,colour="grey", linewidth = 0.3,
+              alpha = 0.45, width = 1, adjust = 1) + 
+  geom_boxplot(width = 0.10, outlier.shape = NA,
+               colour = "grey10", fill = "white", alpha = 0.85, linewidth = 0.3) +
+  stat_summary(fun = median, geom = "point", shape = 23, size = 1.8,
+               fill = "white", colour = "grey10") +
+  geom_jitter(aes(colour = Life_Form), width = 0.12, height = 0,
+              alpha = 0.2, size = 0.9, show.legend = FALSE) +
+  scale_fill_hue() +
+  scale_colour_hue() +
+  scale_y_log10(labels = scales::comma_format(accuracy = 1)) +
+  labs(title = "",
+       subtitle = "",
+       x = "Neighbour species",
+       y = "Canopy volume (cm³, log10 scaled)",
+       fill = "Life form") +
+  theme_minimal(base_size = 14) +
+  theme(panel.grid.major.x = element_blank(),
+        panel.grid.minor = element_blank(),
+        axis.text.x = element_text(angle = 45, hjust = 1, face = "italic"),
+        axis.title = element_text(face = "bold"),
+        legend.position = "top",
+        legend.box = "horizontal",
+        plot.title = element_text(face = "bold", hjust = 0.5),
+        plot.subtitle = element_text(hjust = 0.5))
+
+### Appendix S5. 
+
+# Figure S5. Mean RII in relation to life forms of neighbouring species.
+
+kruskal <- kruskal.test(Volume_canopy  ~ Life_Form, data = df)
+
+print(kruskal)
+dunn_res <- dunn.test(df$Volume_canopy, df$Life_Form, kw = FALSE, method='bh')
+print(dunn_res$comparisons)
+print(dunn_res$P.adjusted)
+
+rii_means <- df %>% 
+  group_by(Espece_nurse, Life_Form) %>% 
+  summarise(mean_RII = mean(RII, na.rm = TRUE), .groups = "drop")
+
+kw_rii <- kruskal.test(mean_RII ~ Life_Form, data = rii_means)
+print(kw_rii)
+
+ggplot(rii_means, aes(x = mean_RII, y = Life_Form, colour = Espece_nurse)) +
+  geom_point(size = 3)+
+  scale_x_continuous(limits = c(-1, 1)) +
+  geom_vline(xintercept = 0, linetype = "dashed") +
+  geom_text_repel(data=rii_means,
+                  aes(label=Espece_nurse),
+                  size=3.5,fontface='italic',
+                  max.overlaps = 100,
+                  box.padding = 0.3,
+                  point.padding = 0.2)+
+  theme_bw() +
+  labs(title = "",
+       x = "Mean RII", y = "Life form") +
+  theme(legend.position = "none",
+        strip.text = element_text(face = "italic", size = 10),
+        panel.spacing.y = unit(1.5, "cm"))
+
+### Appendix S6.
+
+# Table S6. Estimated coefficients and significance of the linear regression model 
+# predicting RII variations from site, deglaciated area, log-transformed canopy volume, neighbouring species, and their interactions.
+
+summary(model_interaction_explicit)
+
+### Appendix S7.
+
+# Figure S7. Predicted Relative Interaction Index (RII) by neighbouring 
+#   species in the two deglaciated areas
+
+rii_means <- df_compare %>% 
+  group_by(Espece_nurse, Deglaciated_area) %>% 
+  summarise(mean_RII = mean(pred_RII, na.rm = TRUE), .groups = "drop") %>% 
+  mutate(Zone_label = recode(Deglaciated_area, "A" = "0-30", "B" = "30-60"))
+
+rii_means <- rii_means %>% 
+  group_by(Zone_label) %>% 
+  arrange(mean_RII, .by_group = TRUE) %>% 
+  mutate(Species_in_zone = factor(Espece_nurse, levels = unique(Espece_nurse))) %>% 
+  ungroup()
+
+# Figure S7. a) 0-30 years since glacier retreat
+
+wilcox_results <- df_compare %>%  
+  group_by(Espece_nurse, Deglaciated_area) %>%  
+  summarise(  
+    mean_RII = mean(pred_RII, na.rm = TRUE),  
+    se_RII = sd(pred_RII, na.rm = TRUE) / sqrt(n()),  
+    p_value = tryCatch({wilcox.test(pred_RII, mu = 0)$p.value}, error = function(e) NA),  
+    n = n(),  
+    .groups = "drop"  
+  ) %>%  
+  mutate(  
+    significance = case_when(  
+      !is.na(p_value) & p_value < 0.001 ~ "***",  
+      !is.na(p_value) & p_value < 0.01 ~ "**",  
+      !is.na(p_value) & p_value < 0.05 ~ "*",  
+      TRUE ~ "ns"  
+    )  
+  )  
+
+ggplot(filter(rii_means, Zone_label == "0-30"),
+       aes(x = mean_RII, y = Species_in_zone)) +
+  geom_vline(xintercept = 0, linetype = "dashed") +
+  geom_point(size = 3, colour = "darkorange") +
+  scale_x_continuous(limits = c(-1, 1), breaks = seq(-1, 1, 0.5)) +
+  labs(title = "a) 0-30 years",
+       x = "Mean RII", y = "Neighbouring species") +
+  theme_bw() +
+  theme(axis.text.y = element_text(face = "italic"))
+
+# Figure S7. b) 30-60 years since glacier retreat
+
+rii_zone_30_60 <- rii_means %>% filter(Zone_label == '30-60')
+rii_zone_30_60 <- rii_zone_30_60 %>%
+  arrange(mean_RII) %>%
+  mutate(Species_in_zone = factor(Species_in_zone, levels = unique(Species_in_zone)))
+
+ggplot(rii_zone_30_60, aes(x = mean_RII, y = Species_in_zone)) +
+  geom_point(size = 3, colour = 'darkorange') +
+  geom_vline(xintercept = 0, linetype = "dashed") +
+  scale_x_continuous(limits = c(-1, 1), breaks = seq(-1, 1, 0.5)) +
+  labs(title = 'b) 30-60 years',
+       x = 'Mean RII', y = 'Neighbouring species') +
+  theme_bw() +
+  theme(axis.text.y = element_text(face = 'italic'))
+
+### Appendix S8.
+
+# Figure S8. Canopy volume (cm3) variations of neighbouring species in each deglaciated area
+# (0-30 years; 30-60 years).
+
+wilcox_res <- df %>% 
+  group_split(Espece_nurse) %>% 
+  map_df(function(sub){
+    
+    if(n_distinct(sub$Deglaciated_area)==2){
+      test <- wilcox.test(Volume_canopy ~ Deglaciated_area, data = sub, exact = FALSE)
+      z  <- qnorm(test$p.value/2, lower.tail = FALSE) *
+        sign(test$statistic - (nrow(sub)*(nrow(sub)+1))/4)
+      r  <- abs(z)/sqrt(nrow(sub))
+      tibble(Species  = unique(sub$Espece_nurse),
+             n_A      = sum(sub$Deglaciated_area=="A"),
+             n_B      = sum(sub$Deglaciated_area=="B"),
+             W        = as.numeric(test$statistic),
+             p_value  = test$p.value,
+             effect_r = r)
+    } else {
+      tibble(Species  = unique(sub$Espece_nurse),
+             n_A      = sum(sub$Deglaciated_area=="A"),
+             n_B      = sum(sub$Deglaciated_area=="B"),
+             W        = NA_real_,
+             p_value  = NA_real_,
+             effect_r = NA_real_)
+    }
+  }) %>% 
+  mutate(p_adj = p.adjust(p_value, method = "fdr"),
+         significant = ifelse(!is.na(p_adj) & p_adj < 0.05, "Yes", "No"))
+
+stars_df <- wilcox_res %>% 
+  mutate(star = case_when(
+    is.na(p_adj)      ~ "",
+    p_adj < 0.001     ~ "***",
+    p_adj < 0.01      ~ "**",
+    p_adj < 0.05      ~ "*",
+    TRUE              ~ ""
+  )) %>% 
+  transmute(Espece_nurse = Species, star)
+
+pos_df <- df %>% 
+  group_by(Espece_nurse) %>% 
+  summarise(y_pos = max(Volume_canopy, na.rm = TRUE)*0.9, .groups = "drop")
+
+anno_df <- left_join(stars_df, pos_df, by = "Espece_nurse") %>% 
+  mutate(x_pos = 30)
+
+df_plot <- df %>% 
+  mutate(x_pos = ifelse(Deglaciated_area=="A", 15, 45))
+
+ggplot(df_plot, aes(x = x_pos, y = Volume_canopy, fill = Deglaciated_area)) +
+  geom_boxplot(width = 15, outlier.shape = 21, alpha = 0.7) +
+  facet_wrap(~ Espece_nurse, scales = "free_y") +
+  geom_text(data = anno_df,
+            aes(x = x_pos, y = y_pos, label = star),
+            inherit.aes = FALSE, size = 6) +
+  scale_x_continuous(breaks = c(15, 45),
+                     labels = c("0-30 years", "30-60 years"),
+                     limits = c(0, 60),
+                     name = "Deglaciated area") +
+  labs(title = "",
+       y = "Canopy volume") +
+  theme_bw() +
+  theme(legend.position = "none",
+        strip.text = element_text(face = "italic", size = 10),
+        panel.spacing.y = unit(1.5, "cm"))
