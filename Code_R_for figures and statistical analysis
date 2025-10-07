@@ -30,7 +30,7 @@ colnames(df)
 
 model_interaction_explicit <- lm(RII ~ Site * Deglaciated_area + log(Volume_canopy) + Site_Nurse, data = df)
 
-anova(model_interaction_explicit)
+anova(model_interaction_explicit,type=2)
 
 summary(model_interaction_explicit)
 par(mfrow=c(2,2))
